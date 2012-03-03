@@ -209,18 +209,19 @@ sub new {
     bless $self, $class;
 }
 sub from_consumer_and_token {
-    my ($consumer, $http_url, $token, $pin) = @_;
+    my ($consumer, $http_url, $token, $params) = @_;
     my $default  = {
         'oauth_consumer_key'    =>  $consumer->token,
         'oauth_timestamp'       =>  int(time),
         'oauth_nonce'           =>  int( rand(2**32)),
         'oauth_version'         =>  "1.0",
-        #'oauth_timestamp'       =>  "1330225825",
-        #'oauth_nonce'           =>  "79844044",
     };
     $default->{oauth_token}    = $token->token if defined $token;
-    $default->{oauth_verifier} = $pin if defined $pin;
-    my $self = &new('GET', $http_url);
+    $default->{oauth_verifier} = $params->{PIN} if defined $params->{PIN};
+    my $http_method = 'GET';
+    $http_method    = $params->{method} if defined $params->{method};
+
+    my $self = &new($http_method, $http_url);
     $self->{parameters} = $default;
     return $self;
 }
@@ -379,7 +380,7 @@ sub get_access_token {
                 $self->{_consumer},
                 $url,
                 $self->{request_token},
-                $pin
+                {PIN=>$pin},
     );
     $req->sign_request(
         $self->{_sigmethod},
@@ -393,8 +394,10 @@ sub get_access_token {
                  $url,
                  $req->to_header
     );
+    print $req->to_header->[1],"\n";
     my $agent = LWP::UserAgent->new();
     my $resp  = $agent->request($r);
+    print $resp->{_content},"\n";
     my $token = OAuthToken::from_string($resp->{_content});
     $self->{access_token} = $token;
     return $token;
@@ -406,11 +409,95 @@ sub set_access_token {
     $self->{access_token} = $token;
 }
 
+sub fetch {
+    my $self = shift;
+    my ($api, $http_method, $params) = @_;
+    my $req  = undef;
+
+    my $url  = $api->get_url;
+    if (uc $http_method eq 'GET') {
+        $url .= '?' if defined $params;
+        foreach my $k (keys %{$params}) {
+            $url = $url . '&' unless substr $url,-1 eq '?';
+            $url = $url . $k . '=' . $params->{$k};
+        }
+        print "GET API: $url\n";
+        $req = OAuthRequest::from_consumer_and_token(
+                    $self->{_consumer},
+                    $url,
+                    $self->{access_token},
+        );
+    } else {
+        $req = OAuthRequest::from_consumer_and_token(
+                    $self->{_consumer},
+                    $url,
+                    $self->{access_token},
+                    {
+                        method  =>  $http_method,
+                        %{$params},
+                    }
+        );
+    }
+    
+    $req->sign_request(
+        $self->{_sigmethod},
+        $self->{_consumer},
+        $self->{access_token},
+    );
+    
+    use HTTP::Request;
+    use LWP::UserAgent;
+
+    my $agent = LWP::UserAgent->new;
+    my $r     = HTTP::Request->new(
+                    uc $http_method,
+                    $req->to_url,
+    );
+    my $resp  = $agent->request($r);
+    print $resp->{_content};
+}
+
 =item API
 
 Weibo API Handler
 
 =cut
+
+package API;
+
+our $AUTOLOAD;
+my  $base_url = "http://api.weibo.com/2";
+my  $api_url  = $base_url;
+my  @branches = qw/
+        statuses
+        emotions
+        comments
+        users
+        friendships
+        account
+        favourites
+        trends
+        tags
+        register
+        suggestions
+        remind
+        common
+        location/;
+
+sub new { bless {}, "API" }
+
+sub AUTOLOAD {
+    my $self = shift;
+    my $name = $AUTOLOAD;
+    $name    =~ s/.*://;
+    $api_url = $base_url if grep { $_ eq $name } @branches;
+    $api_url = $api_url . "/" . $name;
+    return $self;
+}
+
+sub get_url { $api_url }
+
+#-------------------------------------------------------------------
 
 1;
 
@@ -424,22 +511,22 @@ xiaomo(wxm4ever@gmail.com)
 
 #-------------------------------
 
-package main;
-my $consumer_token  = "2986120742";
-my $consumer_secret = "796b90d5a6e3a1cc4d719726f5f99f7d";
-my $access_token    = "c7a7b33fd0d8386591a4611d42dd182b";
-my $access_secret   = "862a8dbfbd846bbd46931dd0d5a90f26";
+#package main;
+#my $consumer_token  = "2986120742";
+#my $consumer_secret = "796b90d5a6e3a1cc4d719726f5f99f7d";
+#my $access_token    = "c7a7b33fd0d8386591a4611d42dd182b";
+#my $access_secret   = "862a8dbfbd846bbd46931dd0d5a90f26";
 
-my $hdl = OAuthHandler->new({
-    consumer_token  =>  $consumer_token,
-    consumer_secret =>  $consumer_secret,
-});
+#my $hdl = OAuthHandler->new({
+#    consumer_token  =>  $consumer_token,
+#    consumer_secret =>  $consumer_secret,
+#});
 #print $hdl->get_authorization_url(),"\n";
 #my $pin = <>;
 #chomp $pin;
 #print "PIN: $pin\n";
 #$access_token = $hdl->get_access_token($pin);
-my $token = OAuthToken->new($access_token, $access_secret);
-$hdl->set_access_token($token);
+#my $token = OAuthToken->new($access_token, $access_secret);
+#$hdl->set_access_token($token);
 
 __END__
